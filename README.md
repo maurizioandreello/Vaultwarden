@@ -316,7 +316,8 @@ disattivare il pannello.
 
   # .env: copiarlo in /srv/vaultwarden/.env (root:root 600) SOLO se si
   # ripristina su un server nuovo; altrimenti confrontarlo con quello
-  # esistente (diff "$TMP_R/x/.env" /srv/vaultwarden/.env) e decidere.
+  # esistente SENZA stamparne il contenuto (contiene segreti):
+  #   cmp -s "$TMP_R/x/.env" /srv/vaultwarden/.env && echo uguale || echo diverso
 
   rm -rf "$TMP_R"
   docker compose -f /opt/vaultwarden/compose.yaml up -d
