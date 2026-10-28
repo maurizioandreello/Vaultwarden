@@ -1,0 +1,9 @@
+# Mai committare segreti o dati: il .env reale vive solo sul server
+# (/srv/vaultwarden/.env, root 600).
+.env
+*.env
+!.env.example
+data/
+*.bak
+__pycache__/
+*.pyc

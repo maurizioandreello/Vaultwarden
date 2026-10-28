@@ -1,0 +1,49 @@
+# Vaultwarden aziendale Gate T1 — wsportal.gatet1.it
+#
+# Il progetto si chiama "vaultwarden": `docker compose ps`, `docker compose logs`.
+# Variabili in /srv/vaultwarden/.env (root 600), dati in /srv/vaultwarden/data
+# (uid/gid 10003: il container NON gira come root).
+# Prima dell'avvio: chown -R 10003:10003 /srv/vaultwarden/data  (vedi README).
+
+name: vaultwarden
+
+services:
+  vaultwarden:
+    # Tag+digest vanno aggiornati INSIEME (vedi README -> aggiornamenti).
+    image: vaultwarden/server:1.37.4@sha256:efb3cde962015fcc036b2ea625242248611943b27212ebf4392841fb30fad055
+    container_name: vaultwarden
+    restart: unless-stopped
+
+    # Non-root: utente numerico (non deve esistere nell'immagine).
+    # Richiede ROCKET_PORT=8080 nel .env: le porte <1024 sono privilegiate.
+    user: "10003:10003"
+
+    env_file: /srv/vaultwarden/.env
+
+    volumes:
+      - /srv/vaultwarden/data:/data
+
+    # Solo loopback: tutto il traffico passa da nginx (host) su :443.
+    # L'eccezione e' la rete docker `vault` (fase 2: backend wsportal).
+    ports:
+      - "127.0.0.1:8081:8080"
+
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Healthcheck dell'immagine (docker/healthcheck.sh): legge ROCKET_PORT
+    # dall'ambiente e fa GET /alive, quindi funziona con la porta 8080 e
+    # con utente non privilegiato (curl e' presente nell'immagine).
+
+    networks:
+      - vault
+
+# Nome fisso: in fase 2 il backend wsportal si aggancia a questa rete e
+# raggiunge il servizio come http://vaultwarden:8080 (senza passare da
+# nginx e senza pubblicare altre porte). Il pool indirizzi Docker del
+# server e' 10.201.0.0/16: la subnet viene assegnata automaticamente da li'.
+networks:
+  vault:
+    name: vault

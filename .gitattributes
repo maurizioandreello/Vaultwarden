@@ -1,0 +1,5 @@
+# Gli script girano su Linux (wsportal): sempre LF, anche su checkout
+# Windows (autocrlf=true su questo PC convertirebbe in CRLF).
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf

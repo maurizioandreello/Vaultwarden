@@ -1,0 +1,13 @@
+# /etc/systemd/system/vault-trusted.timer
+# Il poller di secmon aggiorna la lista ogni 120s: qui ogni 2 minuti,
+# allineato. Parte anche 1 minuto dopo il boot.
+[Unit]
+Description=Rigenera periodicamente vault-trusted.conf (TRUSTED -> nginx)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=2min
+Unit=vault-trusted.service
+
+[Install]
+WantedBy=timers.target

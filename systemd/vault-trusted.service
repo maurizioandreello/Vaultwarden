@@ -1,0 +1,24 @@
+# /etc/systemd/system/vault-trusted.service
+# Rigenera /etc/nginx/snippets/vault-trusted.conf dalla lista TRUSTED
+# del router (via DB secmon) e ricarica nginx se cambiata.
+[Unit]
+Description=Genera lo snippet nginx allow/deny da TRUSTED (secmon)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/vaultwarden/trusted/vault_trusted.py
+StateDirectory=vault-trusted
+
+# Hardening moderato e volontario: lo script DEVE poter scrivere in
+# /etc/nginx/snippets, lanciare `nginx -t` (che scrive nel log di errore
+# e legge tutta la config) e `systemctl reload nginx` (socket systemd in
+# /run). Qualunque ProtectSystem=/ReadWritePaths= o sandboxing di rete
+# piu' stretto romperebbe uno di questi passaggi, quindi si limita alle
+# protezioni che non interferiscono.
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes

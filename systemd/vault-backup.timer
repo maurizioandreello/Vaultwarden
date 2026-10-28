@@ -1,0 +1,13 @@
+# /etc/systemd/system/vault-backup.timer
+# Backup giornaliero alle 02:30; Persistent recupera l'esecuzione
+# se il server era spento a quell'ora.
+[Unit]
+Description=Backup giornaliero Vaultwarden su NAS
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+Unit=vault-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+# /etc/systemd/system/vault-backup.service
+# Backup cifrato giornaliero di Vaultwarden su NAS (gpg AES256).
+# RequiresMountsFor garantisce che /mnt/nas-vaultwarden sia montato prima
+# di partire (lo script comunque ricontrolla con mountpoint -q e fallisce
+# se non lo e': meglio un servizio failed che un disco locale pieno).
+[Unit]
+Description=Backup cifrato Vaultwarden su NAS
+RequiresMountsFor=/mnt/nas-vaultwarden
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/vaultwarden/backup/vault-backup.sh
+PrivateTmp=yes
+ProtectHome=yes
