@@ -15,7 +15,13 @@
 #   DEST             dir destinazione        $NAS_MOUNT/vaultwarden
 #   PASSPHRASE_FILE  file con la passphrase  /srv/vaultwarden/secrets/backup_passphrase
 #   RETENTION_DAYS   giorni di retention     30
+#   VW_UID           uid del container       10003
+#                    (la copia del DB gira come questo uid: se girasse come
+#                    root e il container fosse fermo, i file -wal/-shm
+#                    verrebbero creati di proprieta' root e vaultwarden non
+#                    riuscirebbe piu' ad aprire il DB al riavvio)
 set -euo pipefail
+umask 077   # archivio in chiaro e .env nel TMP dir: sempre 600/700
 
 CONFIG=/etc/default/vault-backup
 if [[ -r "$CONFIG" ]]; then
@@ -30,6 +36,7 @@ NAS_MOUNT=${NAS_MOUNT:-/mnt/nas-vaultwarden}
 DEST=${DEST:-$NAS_MOUNT/vaultwarden}
 PASSPHRASE_FILE=${PASSPHRASE_FILE:-/srv/vaultwarden/secrets/backup_passphrase}
 RETENTION_DAYS=${RETENTION_DAYS:-30}
+VW_UID=${VW_UID:-10003}
 
 die() { echo "vault-backup: $*" >&2; exit 1; }
 
@@ -47,10 +54,19 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 STAGE="$TMP_DIR/stage"
 mkdir -p "$STAGE"
 
+# La copia DB gira come VW_UID (come il container), NON come root: cosi'
+# eventuali file -wal/-shm creati aprendo il DB restano di proprieta'
+# dell'utente giusto. TMP_DIR resta 700 root ma attraversabile (711);
+# DB_STAGE e' accessibile solo a VW_UID.
+chmod 711 "$TMP_DIR"
+DB_STAGE="$TMP_DIR/db"
+install -d -m 700 -o "$VW_UID" -g "$VW_UID" "$DB_STAGE"
+
 # Copia consistente del DB con la backup API sqlite (stdlib python3:
 # gestisce i lock del DB aperto dal container in WAL). integrity_check
 # sulla copia, cosi' un backup corrotto fallisce subito.
-python3 - "$DATA_DIR/db.sqlite3" "$STAGE/db.sqlite3" <<'PYEOF'
+setpriv --reuid="$VW_UID" --regid="$VW_UID" --clear-groups \
+    python3 - "$DATA_DIR/db.sqlite3" "$DB_STAGE/db.sqlite3" <<'PYEOF'
 import sqlite3
 import sys
 
@@ -69,6 +85,8 @@ if risultato != "ok":
 print(f"integrity_check: {risultato}")
 PYEOF
 
+cp -a "$DB_STAGE/db.sqlite3" "$STAGE/db.sqlite3"
+
 # Chiavi RSA (necessarie a ripristinare le sessioni/token), config admin,
 # allegati e send se esistono.
 for f in "$DATA_DIR"/rsa_key*; do
@@ -85,7 +103,8 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 NAME="vaultwarden-$STAMP"
 tar -C "$STAGE" -czf "$TMP_DIR/$NAME.tar.gz" .
 
-gpg --batch --yes --symmetric --cipher-algo AES256 \
+gpg --batch --yes --pinentry-mode loopback \
+    --symmetric --cipher-algo AES256 \
     --passphrase-file "$PASSPHRASE_FILE" \
     --output "$DEST/$NAME.tar.gz.gpg" "$TMP_DIR/$NAME.tar.gz"
 chmod 600 "$DEST/$NAME.tar.gz.gpg"

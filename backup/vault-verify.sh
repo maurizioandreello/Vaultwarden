@@ -35,8 +35,9 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "== decifra =="
-gpg --batch --yes --decrypt --passphrase-file "$PASSPHRASE_FILE" \
-    --output "$TMP_DIR/backup.tar.gz" "$ARCHIVIO" 2>/dev/null
+gpg --batch --yes --decrypt --pinentry-mode loopback \
+    --passphrase-file "$PASSPHRASE_FILE" \
+    --output "$TMP_DIR/backup.tar.gz" "$ARCHIVIO"
 [[ -s "$TMP_DIR/backup.tar.gz" ]] || die "decifra fallita o archivio vuoto"
 
 echo "== contenuto dell'archivio =="

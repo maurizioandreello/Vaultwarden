@@ -14,7 +14,8 @@ browser (solo IP in TRUSTED)
 nginx (host)  [allow/deny da /etc/nginx/snippets/vault-trusted.conf]
     |         [/admin, /api/public -> 404]
     v  http://127.0.0.1:8081
-container vaultwarden (uid 10003, porta 8080, rete docker `vault`)
+container vaultwarden (uid 10003, porta 8080,
+rete docker `vault` 10.201.200.0/24, gw 10.201.200.1)
     |
     +-> /data  -> bind mount /srv/vaultwarden/data (db sqlite, allegati...)
 
@@ -69,9 +70,13 @@ dati `/srv/vaultwarden/data`, configurazione `/srv/vaultwarden/.env`
   la lista vuota o `nginx -t` fallisce, `vault_trusted.py` non tocca il
   file esistente: un guasto a monte non apre il servizio a tutti ne'
   blocca gli amministratori. In caso contrario l'ultimo file buono resta.
-- **`IP_HEADER_TRUSTED_PROXIES=10.201.0.0/16`**: `X-Real-IP` e' accettato
-  solo se arriva dal gateway del bridge docker (unica via attraverso cui
-  nginx raggiunge il container); l'IP client governa rate limit e log.
+- **`IP_HEADER_TRUSTED_PROXIES=10.201.200.1`**: `X-Real-IP` e' accettato
+  SOLO se il peer diretto e' il gateway del bridge `vault` (l'unica via
+  attraverso cui nginx -> 127.0.0.1:8081 -> docker-proxy/DNAT raggiunge
+  il container). Gli altri container della stessa rete — fase 2: backend
+  wsportal — NON sono fidati: se impostassero X-Real-IP, l'header
+  verrebbe ignorato e verrebbe usato il loro IP reale. L'IP client
+  governa rate limit e log dei login.
 - **ADMIN_TOKEN hash Argon2** (mai in chiaro), sessione admin 20 minuti.
 - Backup **cifrato** (gpg AES256) fuori dal server, sul NAS.
 
@@ -194,6 +199,16 @@ Tutto come root (o `sudo`) su `wsportal`, salvo dove indicato.
    Diagnostics → "Test SMTP", oppure invitare un utente e verificare
    l'arrivo dell'invito da `pass@gatet1.com`.
 
+10. **Controllo IP client reale**: dopo il primo login da browser,
+    nei log deve comparire l'IP pubblico del client e NON 10.201.200.1
+    (il gateway): se compare il gateway, `IP_HEADER_TRUSTED_PROXIES`
+    non sta funzionando e rate limit/log registrerebbero l'IP sbagliato.
+
+    ```bash
+    docker compose logs vaultwarden | grep -i "login\|failed"
+    # atteso: l'IP sorgente del client reale, mai 10.201.200.1
+    ```
+
 ## Organizzazione "Gate T1"
 
 1. Registrare l'utente `maurizio.andreello@gatet1.it` (le registrazioni
@@ -205,19 +220,37 @@ Tutto come root (o `sudo`) su `wsportal`, salvo dove indicato.
 3. Creare le **collezioni** (es. "Infrastruttura", "Servizi clienti",
    "Amministrazione") e i **gruppi** omonimi (feature beta attivata con
    `ORG_GROUPS_ENABLED=true`, usata dall'import di fase 2).
-4. **Policy da attivare** nell'organizzazione (nomi come appaiono):
-   - *Require two-step login* — 2FA obbligatoria per tutti i membri;
-   - *Master password* — complessita' minima (es. score >= 3, len >= 12);
-   - *Single organization* — gli utenti non possono entrare in altre org;
-   - *Disable Send* — coerente con `SENDS_ALLOWED=false` globale;
-   - *Remove individual vault* — forza il salvataggio solo in collezioni
-     aziendali (valutare: e' restrittiva);
-   - *Account recovery (Reset password)* — permette il reset master
-     password da admin; in vaultwarden richiede prima *Single
-     organization* se si attiva `ENFORCE_SINGLE_ORG_WITH_RESET_PW_POLICY`;
-   - *Remove unlock with PIN* — opzionale, valutare.
-   Non supportate da vaultwarden: Require SSO, Vault timeout,
-   DisablePersonalVaultExport (non AGPL) — non cercarle in UI.
+4. **Policy da attivare** nell'organizzazione. Elenco verificato sul
+   sorgente del tag 1.37.4 (`src/db/models/org_policy.rs` enum
+   `OrgPolicyType` + punti di applicazione in `src/api/`):
+   - *Require two-step login* — 2FA obbligatoria: all'attivazione revoca
+     i membri senza 2FA e la richiede ai nuovi
+     (`two_factor::enforce_2fa_policy_for_org`, `accounts.rs`);
+   - *Master password* — complessita' minima (es. score >= 3, len >= 12):
+     il server fonde le policy attive e le invia ai client che le
+     applicano (`api/mod.rs::master_password_policy`);
+   - *Single organization* — gli utenti non possono entrare/creare altre
+     org e all'attivazione rimuove i membri che sono in altre
+     (`organizations.rs`);
+   - *Disable Send* — vieta la creazione di Send ai membri
+     (`sends.rs::enforce_disable_send_policy`; coerente con
+     `SENDS_ALLOWED=false` globale);
+   - *Remove individual vault* ("Personal ownership") — forza il
+     salvataggio solo in collezioni aziendali
+     (`ciphers.rs::enforce_personal_ownership_policy`);
+   - *Send options* — opzione "disable hide email" applicata
+     (`sends.rs::enforce_disable_hide_email_policy`);
+   - *Account recovery* ("Reset password") — reset master password da
+     admin (`organizations.rs::check_reset_password_applicable`); il
+     vincolo "richiede Single organization" scatta solo se si attiva la
+     config `ENFORCE_SINGLE_ORG_WITH_RESET_PW_POLICY` (default false).
+   - Presenti nell'enum ma **applicazione non verificata** nel codice
+     (probabilmente solo lato client): *Password generator*, *Remove
+     unlock with PIN*, *Restricted item types*, *URI match defaults*,
+     *Organization user notification*.
+   - Non presenti proprio nell'enum (marcate "not supported" nel
+     sorgente, alcune "Not AGPLv3 Licensed"): Require SSO, Vault timeout,
+     Disable personal vault export e altre — non cercarle in UI.
 
 ## Pannello admin via tunnel SSH
 
@@ -255,16 +288,39 @@ disattivare il pannello.
   `config.json`, `attachments/`, `sends/`, `.env`.
 - **Verifica periodica** (fare ogni tanto, anche mensile):
   `backup/vault-verify.sh <archivio>` — sha256, decifra, integrity_check.
-- **Ripristino** (a servizio fermo):
+- **Ripristino** (a servizio fermo): l'archivio contiene `.env` e il DB
+  in chiaro — lavorare solo in un `mktemp -d` (700) e rimuoverlo alla
+  fine. I dati attuali non vengono sovrascritti ma spostati da parte.
 
   ```bash
   docker compose -f /opt/vaultwarden/compose.yaml down
-  gpg --batch --decrypt --passphrase-file /srv/vaultwarden/secrets/backup_passphrase \
-      -o /tmp/vault.tar.gz /mnt/nas-vaultwarden/vaultwarden/<archivio>.tar.gz.gpg
-  mkdir /tmp/vault-x && tar -C /tmp/vault-x -xzf /tmp/vault.tar.gz
-  cp -a /tmp/vault-x/. /srv/vaultwarden/data/   # .env a parte in /srv/vaultwarden/
+
+  TMP_R=$(mktemp -d)   # 700: qui finiscono DB e .env in chiaro
+  gpg --batch --yes --decrypt --pinentry-mode loopback \
+      --passphrase-file /srv/vaultwarden/secrets/backup_passphrase \
+      -o "$TMP_R/vault.tar.gz" \
+      /mnt/nas-vaultwarden/vaultwarden/<archivio>.tar.gz.gpg
+  mkdir "$TMP_R/x" && tar -C "$TMP_R/x" -xzf "$TMP_R/vault.tar.gz"
+
+  # per sicurezza: niente file journal sqlite eventualmente presenti
+  rm -f "$TMP_R"/x/db.sqlite3-wal "$TMP_R"/x/db.sqlite3-shm
+
+  # dati attuali da parte (NON sovrascrivere), data/ vuota
+  mv /srv/vaultwarden/data "/srv/vaultwarden/data.prev-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p /srv/vaultwarden/data
+
+  # copia tutto TRANNE .env, poi proprieta' all'uid del container
+  find "$TMP_R/x" -mindepth 1 -maxdepth 1 ! -name .env \
+      -exec cp -a {} /srv/vaultwarden/data/ \;
   chown -R 10003:10003 /srv/vaultwarden/data
+
+  # .env: copiarlo in /srv/vaultwarden/.env (root:root 600) SOLO se si
+  # ripristina su un server nuovo; altrimenti confrontarlo con quello
+  # esistente (diff "$TMP_R/x/.env" /srv/vaultwarden/.env) e decidere.
+
+  rm -rf "$TMP_R"
   docker compose -f /opt/vaultwarden/compose.yaml up -d
+  docker compose ps        # attendere "healthy"
   ```
 
 ## Aggiornamento di versione

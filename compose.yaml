@@ -42,8 +42,15 @@ services:
 
 # Nome fisso: in fase 2 il backend wsportal si aggancia a questa rete e
 # raggiunge il servizio come http://vaultwarden:8080 (senza passare da
-# nginx e senza pubblicare altre porte). Il pool indirizzi Docker del
-# server e' 10.201.0.0/16: la subnet viene assegnata automaticamente da li'.
+# nginx e senza pubblicare altre porte). Subnet fissata a mano in una zona
+# libera del pool Docker 10.201.0.0/16 del server (al 2026-10-28 erano in
+# uso 10.201.0-2.0/24): il gateway 10.201.200.1 e' l'unica sorgente da cui
+# vaultwarden accetta l'header X-Real-IP (IP_HEADER_TRUSTED_PROXIES); gli
+# altri container della stessa rete NON sono fidati.
 networks:
   vault:
     name: vault
+    ipam:
+      config:
+        - subnet: 10.201.200.0/24
+          gateway: 10.201.200.1
