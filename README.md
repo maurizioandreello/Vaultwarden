@@ -132,11 +132,13 @@ Tutto come root (o `sudo`) su `wsportal`, salvo dove indicato.
    installare il vhost (senza il file `nginx -t` fallirebbe):
 
    ```bash
-   install -d -m 700 -o vaultwarden /var/lib/vault-trusted  # oppure lascia fare a systemd StateDirectory
    /usr/bin/python3 /opt/vaultwarden/trusted/vault_trusted.py --dry-run   # verifica output
    /usr/bin/python3 /opt/vaultwarden/trusted/vault_trusted.py
    cat /etc/nginx/snippets/vault-trusted.conf   # deve contenere allow ... + deny all;
    ```
+
+   La directory dello stato (`/var/lib/vault-trusted`, cache DNS) viene
+   creata dallo script stesso / da `StateDirectory=` dell'unit.
 
    In produzione lo scrive il timer (passo 8) ogni 2 minuti.
 
