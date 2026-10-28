@@ -34,6 +34,11 @@ echo "== verifica sha256 =="
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+# gpg vuole un homedir scrivibile anche solo per decifrare.
+GNUPGHOME="$TMP_DIR/gnupg"
+install -d -m 700 "$GNUPGHOME"
+export GNUPGHOME
+
 echo "== decifra =="
 gpg --batch --yes --decrypt --pinentry-mode loopback \
     --passphrase-file "$PASSPHRASE_FILE" \

@@ -54,6 +54,12 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 STAGE="$TMP_DIR/stage"
 mkdir -p "$STAGE"
 
+# gpg vuole un homedir scrivibile anche per la sola cifratura simmetrica:
+# sotto systemd (ProtectHome=yes) /root e' read-only. GNUPGHOME nel tmp.
+GNUPGHOME="$TMP_DIR/gnupg"
+install -d -m 700 "$GNUPGHOME"
+export GNUPGHOME
+
 # La copia DB gira come VW_UID (come il container), NON come root: cosi'
 # eventuali file -wal/-shm creati aprendo il DB restano di proprieta'
 # dell'utente giusto. TMP_DIR resta 700 root ma attraversabile (711);
